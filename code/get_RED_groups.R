@@ -62,7 +62,6 @@ grab_group_with_max_redval <- function(tree, red_cutoff) {
 
 tree <- read.tree(opt$tree)
 out_groups <- grab_group_with_max_redval(tree,opt$percent_ident)
-print(out_groups)
 out_groups <- matrix(out_groups, ncol=2, byrow = T)
 write.table(out_groups, paste(opt$out_dir, "/red_groups.tsv", sep=""), sep="\t", row.names = F, quote = F, col.names = F)
 
