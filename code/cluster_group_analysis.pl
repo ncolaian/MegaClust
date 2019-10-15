@@ -31,14 +31,20 @@ my $phylo_tree;
 my $percent_id = .95;
 my $out_dir;
 my $fasta_dir;
-my $fasta_ext = ".faa";
-my $num_genomes = 887;
+my $fasta_ext = "faa";
+my $num_genomes = 20;
 
 #Read in the variables from the command line
 GetOptions( 'man'   =>  \$man,
             'help'  =>  \$help,
-            'RED_code|r:s' => \$RED_code_full_path,
-            
+            'RED_code|r=s' => \$RED_code_full_path,
+	    'phylo_tree|tree=s' => \$phylo_tree,
+	    'perc_id=f' => \$percent_id,
+	    'out_dir|out=s' => \$out_dir,
+	    'fasta_dir|db=s' => \$fasta_dir,
+	    'fasta_ext|ext=s' => \$fasta_ext,
+	    'num_genomes|num=s' => \$num_genomes,
+            'help|h' => \$help
             ) || die("There was an error in the command line arguements\n");
 
 # Pod Usage for the manual and the help pages
@@ -76,9 +82,10 @@ sub get_defined_RED_groups {
    my ($id) = @_;
    #run the r-script to calculate RED score
    #pass tree (-t), percent_id (-p), and out_dir  (-o)
-   
+   print("$phylo_tree\n");
+   `Rscript --no-save --no-restore $RED_code_full_path -t $phylo_tree -p $id -o $out_dir/$id.dir`;
    #get stastics along with creating the directory structure needed
-   calculate_RED_group_statistics();
+   calculate_RED_group_statistics($id);
    return();
 }
 
@@ -216,6 +223,29 @@ Log::Log4perl::CommandLine qw(:all);
 =head1 INHERIT
 
 =head1 SYNOPSIS
+
+	cluster_group_analysis.pl
+		--RED_code (--r)
+		--phylo_tree (--tree)
+		--out_dir (--out)
+		--fasta_dir (--db)
+		[--fasta_ext (--ext)]
+		--num_genomes (--num)
+		[--perc_id]
+
+		[--help]
+		[--man]
+
+	--RED_code = Path to R script that calculates RED scores.
+	--phylo_tree = Path to tree of all genomes in Newick format.
+	--out_dir = Path to output directory.
+	--fasta_dir = Path to directory containing a fasta for each genome to be included.
+	--fasta_ext = Extension for fasta files (DEFAULT: "faa").
+	--num_genomes = Number of genomes involved in the analysis.
+	--perc_id = The percent identity analysis should be done at. Set to 0 to test over the interval from 0.5 to 0.95 (DEFAULT: 0.95).
+	--help = Prints USAGE.
+	--man = Prints man page.
+
 
 =head1 PARAMETERS
 
