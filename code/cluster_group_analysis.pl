@@ -26,7 +26,7 @@ use List::Util qw(sum min max);
 #My Variables
 my $help = 0;
 my $man = 0;
-my $RED_code_full_path = ""; #this is a path that will be filled in based on the GIT repository
+my $RED_code_full_path; #this is a path that will be filled in based on the GIT repository
 my $phylo_tree;
 my $percent_id = .95;
 my $out_dir;
@@ -55,7 +55,7 @@ if ( $man ) { pod2usage(-verbose =>3) }
 my $logger = get_logger();
 
 ## Main ##
-
+check_input();
 #step that gets red groups and creates directory structure. Will also create statistics for the RED groups
 create_directories_based_on_RED();
 
@@ -69,6 +69,22 @@ run_orthofinder();
 
 #will be finished when we know exactly what we need to work on
 sub check_input {
+
+	if(! defined $RED_code_full_path){
+		pod2usage(-message => "ERROR- Required parameter not found: --RED_code\n", -exitval => 2);
+	}
+	if(! defined $phylo_tree){
+		pod2usage(-message => "ERROR- Required parameter not found: --phylo_tree\n", -exitval => 2);
+	}
+	if(! defined $out_dir){
+		pod2usage(-message => "ERROR- Required parameter not found: --out_dir\n", -exitval => 2);
+	}
+	if(! defined $fasta_dir){
+		pod2usage(-message => "ERROR- Required parameter not found: --fasta_dir\n", -exitval => 2);
+	}
+	if(! defined $num_genomes){
+		pod2usage(-message => "ERROR- Required parameter not found: --num_genomes\n", -exitval => 2);
+	}
    
 }
 
@@ -82,7 +98,6 @@ sub get_defined_RED_groups {
    my ($id) = @_;
    #run the r-script to calculate RED score
    #pass tree (-t), percent_id (-p), and out_dir  (-o)
-   print("$phylo_tree\n");
    `Rscript --no-save --no-restore $RED_code_full_path -t $phylo_tree -p $id -o $out_dir/$id.dir`;
    #get stastics along with creating the directory structure needed
    calculate_RED_group_statistics($id);
