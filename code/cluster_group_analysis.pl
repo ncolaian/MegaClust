@@ -33,6 +33,7 @@ my $out_dir;
 my $fasta_dir;
 my $fasta_ext = "faa";
 my $num_genomes = 20;
+my $bac120_tsv = "bac120_gene_info.tsv";
 
 #Read in the variables from the command line
 GetOptions( 'man'   =>  \$man,
@@ -44,6 +45,7 @@ GetOptions( 'man'   =>  \$man,
 	    'fasta_dir|db=s' => \$fasta_dir,
 	    'fasta_ext|ext=s' => \$fasta_ext,
 	    'num_genomes|num=s' => \$num_genomes,
+		 'bac120_tsv|bt:s'	=>	\$bac120_tsv,
             'help|h' => \$help
             ) || die("There was an error in the command line arguements\n");
 
@@ -69,7 +71,7 @@ run_orthofinder();
 
 #will be finished when we know exactly what we need to work on
 sub check_input {
-
+	$logger->info("Checking for all necessary inputs\n");
 	if(! defined $RED_code_full_path){
 		pod2usage(-message => "ERROR- Required parameter not found: --RED_code\n", -exitval => 2);
 	}
@@ -85,7 +87,12 @@ sub check_input {
 	if(! defined $num_genomes){
 		pod2usage(-message => "ERROR- Required parameter not found: --num_genomes\n", -exitval => 2);
 	}
-   
+	if( ! -e $bac120_tsv ) {
+		logger->info("Bac120 tsv file not found. A new one will be created in the out directory\n");
+		get_bac120_genes();
+	}
+   $logger->info("All needed inputs were passed\n");
+	return();
 }
 
 #This script will be divided into multiple parts
@@ -177,7 +184,15 @@ sub calculate_RED_group_statistics {
 #We will then have to run Orthofinder on each cluster within each red value. This will obviously have to be parallelized.
 #We may try to create a run sheet so that the submissions can be shared across users
 sub run_orthofinder {
+	
    
+}
+
+#Here should go the script to create a tsv file that identifies the bac120 genes in all of the genomes
+sub get_bac120_genes {
+	#the goal here is to have the code that creates a nice metadata file that contains the identity of all the bac120 genomes in the database provided
+	#There is an optioon to pass this file so that it only needs to be run once.
+	
 }
 
 #should maybe provide a way to run this without running the rest of the script
@@ -185,9 +200,13 @@ sub submit_orthofinder_jobs {
    
 }
 
-#After performing orthofinder, we will phylaAmphora to identify the completeness of their orthogroups and calculate a metric (look back to Isai's Nature Genetics Paper)
-sub identify_completeness_of_amphora_gene_orthogroups {
-   
+#Once orthofinder is complete, we will need to get the statistics from orthofinder. The idea will be to use the genomes from each RED group and get 2 overall statistics
+#1 Purity -> (total genes in OG clusters that are bac120 genes)/(total # of genes within those orthogroups)
+#2 Fragmentation -> (120 * # of RED Groups)/(OGs that contain all of the bac120 genes in all of the RED groups)
+
+#these two stats are from Isai's Nature Genetics story
+sub get_ortholog_stats {
+	
 }
 
 ######we should also look into using other metrics to score RED scores#####
