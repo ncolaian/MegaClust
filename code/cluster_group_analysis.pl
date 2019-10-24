@@ -34,19 +34,20 @@ my $fasta_dir;
 my $fasta_ext = "faa";
 my $num_genomes = 20;
 my $bac120_tsv = "bac120_gene_info.tsv";
-my $hmm_dir = "";
+my $hmm_dir = "../data/bac120_hmms";
 
 #Read in the variables from the command line
 GetOptions( 'man'   =>  \$man,
             'help'  =>  \$help,
             'RED_code|r=s' => \$RED_code_full_path,
 	    'phylo_tree|tree=s' => \$phylo_tree,
-	    'perc_id=f' => \$percent_id,
+	    'perc_id:f' => \$percent_id,
 	    'out_dir|out=s' => \$out_dir,
 	    'fasta_dir|db=s' => \$fasta_dir,
 	    'fasta_ext|ext:s' => \$fasta_ext,
 	    'num_genomes|num=s' => \$num_genomes,
-		 'bac120_tsv|bt:s'	=>	\$bac120_tsv,
+	    'bac120_tsv|bt:s' => \$bac120_tsv,
+	    'hmm_dir|hd:s' => \$hmm_dir,
             'help|h' => \$help
             ) || die("There was an error in the command line arguements\n");
 
@@ -89,7 +90,7 @@ sub check_input {
 		pod2usage(-message => "ERROR- Required parameter not found: --num_genomes\n", -exitval => 2);
 	}
 	if( ! -e $bac120_tsv ) {
-		logger->info("Bac120 tsv file not found. A new one will be created in the out directory\n");
+		$logger->info("Bac120 tsv file not found. A new one will be created in the out directory\n");
 		get_bac120_genes();
 	}
    $logger->info("All needed inputs were passed\n");
@@ -194,7 +195,46 @@ sub run_orthofinder {
 sub get_bac120_genes {
 	#the goal here is to have the code that creates a nice metadata file that contains the identity of all the bac120 genomes in the database provided
 	#There is an optioon to pass this file so that it only needs to be run once.
+	$logger->info("Attempting to create bac120 gene id file at $out_dir/$bac120_tsv\n");
 	
+	if(! -d "$out_dir/.tmp"){ mkdir "$out_dir/.tmp"; }
+	#Create array of markers. These will be hmm profiles of the bac120 genes.
+	opendir(my $HMMS, $hmm_dir) or die "Cannot open marker hmm directory: $hmm_dir";
+	my @markers;
+	while(readdir $HMMS){
+		if($_ =~ /^\./){ next; } #skip . and .. or any hidden files
+		push @markers, $_;
+	}
+	closedir $HMMS;
+
+	#For each genome, find the gene that is most similar to each marker.
+	#Write to a file with three columns: "bac120_gene	genome_id	gene_id"
+	opendir(my $FASTAS, $fasta_dir) or die "Cannot open fasta directory: $fasta_dir";
+	open(my $outfile, ">", "$out_dir/$bac120_tsv") or die "Cannot open output tsv: $out_dir/$bac120_tsv";
+	print $outfile "marker_gene\tgenome_id\tgene_id\n";
+	while(readdir $FASTAS){
+		if($_ =~ /^\./){ next; } #skip . and .. or any hidden files
+		my ($genome_file, $genome_id) = ($_, $_);
+		$genome_id =~ s/\.$fasta_ext//; #Get id without extension to write to output
+		$logger->debug("About to run hmmsearch for each marker hmm on genome $genome_id");
+		foreach my $hmm (@markers){
+			my $hmm_id = $hmm; #do this because extension is case sensitive!
+			$hmm_id =~ s/\.hmm//i;
+			`hmmsearch --tblout $out_dir/.tmp/$genome_id.$hmm_id.txt $hmm_dir/$hmm $fasta_dir/$genome_file`; #save parseable output to temp file
+			open(my $results, "<", "$out_dir/.tmp/$genome_id.$hmm_id.txt");
+			foreach my $line (<$results>){
+				chomp $line;
+				if($line =~ /^#/){ next; }
+				my @vals = split ' ', $line; #greedy whitespace splitter
+				print $outfile "$hmm_id\t$genome_id\t$vals[0]\n";
+				last;
+			}
+			close($results);
+			`rm $out_dir/.tmp/$genome_id.$hmm_id.txt`;
+		}
+	}
+	close $FASTAS;
+	close($outfile);
 }
 
 #should maybe provide a way to run this without running the rest of the script
