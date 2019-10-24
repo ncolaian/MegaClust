@@ -34,7 +34,7 @@ my $fasta_dir;
 my $fasta_ext = "faa";
 my $num_genomes = 20;
 my $bac120_tsv = "bac120_gene_info.tsv";
-my $hmm_dir = "../data/bac120_hmms";
+my $hmm_dir;
 
 #Read in the variables from the command line
 GetOptions( 'man'   =>  \$man,
@@ -90,8 +90,13 @@ sub check_input {
 		pod2usage(-message => "ERROR- Required parameter not found: --num_genomes\n", -exitval => 2);
 	}
 	if( ! -e $bac120_tsv ) {
-		$logger->info("Bac120 tsv file not found. A new one will be created in the out directory\n");
-		get_bac120_genes();
+		if(! defined $hmm_dir){
+			pod2usage(-message => "ERROR- Bac120 tsv file not found. Must provide a directory of marker hmms", -exitval => 2);
+		}
+		else{
+			$logger->info("Bac120 tsv file not found. A new one will be created in the out directory\n");
+			get_bac120_genes();
+		}
 	}
    $logger->info("All needed inputs were passed\n");
 	return();
@@ -104,6 +109,10 @@ sub check_input {
 ####IMPORTANT####
 #this has been changed, based on the need to perform statistics on the ORTHOGROUP calling at each froup
 sub get_defined_RED_groups {
+	my $R_installed = system("Rscript --help >/dev/null 2>&1");
+	if($R_installed != 0){
+		die "R command not found. Is R installed/loaded?\n";
+	}
    my ($id) = @_;
    #run the r-script to calculate RED score
    #pass tree (-t), percent_id (-p), and out_dir  (-o)
@@ -195,6 +204,10 @@ sub run_orthofinder {
 sub get_bac120_genes {
 	#the goal here is to have the code that creates a nice metadata file that contains the identity of all the bac120 genomes in the database provided
 	#There is an optioon to pass this file so that it only needs to be run once.
+	my $hmmer_installed = system("hmmsearch -h >/dev/null 2>&1");
+	if($hmmer_installed != 0){
+		die "hmmsearch command not found. Is HMMER installed/loaded?\n";
+	}
 	$logger->info("Attempting to create bac120 gene id file at $out_dir/$bac120_tsv\n");
 	
 	if(! -d "$out_dir/.tmp"){ mkdir "$out_dir/.tmp"; }
@@ -308,6 +321,8 @@ Log::Log4perl::CommandLine qw(:all);
 		[--fasta_ext (--ext)]
 		--num_genomes (--num)
 		[--perc_id]
+		[--bac120_tsv (--bt)]
+		[--hmm_dir (--hd)]
 
 		[--help]
 		[--man]
@@ -319,6 +334,8 @@ Log::Log4perl::CommandLine qw(:all);
 	--fasta_ext = Extension for fasta files (DEFAULT: "faa").
 	--num_genomes = Number of genomes involved in the analysis.
 	--perc_id = The percent identity analysis should be done at. Set to 0 to test over the interval from 0.5 to 0.95 (DEFAULT: 0.95).
+	--bac120_tsv = A file containing gene identifications for all bac120 genes in each genome.
+	--hmm_dir = Directory containing hmms of marker genes. REQUIRED IF (and only if) --bac120_tsv NOT PROVIDED.
 	--help = Prints USAGE.
 	--man = Prints man page.
 
