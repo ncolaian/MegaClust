@@ -34,6 +34,7 @@ my $fasta_dir;
 my $fasta_ext = "faa";
 my $num_genomes = 20;
 my $bac120_tsv = "bac120_gene_info.tsv";
+my $hmm_dir = "";
 
 #Read in the variables from the command line
 GetOptions( 'man'   =>  \$man,
@@ -43,7 +44,7 @@ GetOptions( 'man'   =>  \$man,
 	    'perc_id=f' => \$percent_id,
 	    'out_dir|out=s' => \$out_dir,
 	    'fasta_dir|db=s' => \$fasta_dir,
-	    'fasta_ext|ext=s' => \$fasta_ext,
+	    'fasta_ext|ext:s' => \$fasta_ext,
 	    'num_genomes|num=s' => \$num_genomes,
 		 'bac120_tsv|bt:s'	=>	\$bac120_tsv,
             'help|h' => \$help
@@ -184,6 +185,7 @@ sub calculate_RED_group_statistics {
 #We will then have to run Orthofinder on each cluster within each red value. This will obviously have to be parallelized.
 #We may try to create a run sheet so that the submissions can be shared across users
 sub run_orthofinder {
+	#run orthofinder
 	
    
 }
