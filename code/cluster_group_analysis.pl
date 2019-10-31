@@ -1,10 +1,10 @@
 #! /usr/bin/env perl
 
 # This script will be used to perform orthologue identification across different red scores
-# We will be using the phylaamphora genes to determine when these algorithms start to "fall off"
+# We will be using the bac120 genes to determine when these algorithms start to "fall off"
 # in the identification of orthologues
 # our goal is to identify a RED score value that uses the most (if not all) number of genomes while
-# Being robust in identifying 
+# Being robust in identifying orthologous gene clusters
 
 
 ###TO DO:
@@ -35,6 +35,7 @@ my $fasta_ext = "faa";
 my $num_genomes = 20;
 my $bac120_tsv = "bac120_gene_info.tsv";
 my $hmm_dir;
+my $orthofinder_dir = "";
 
 #Read in the variables from the command line
 GetOptions( 'man'   =>  \$man,
@@ -48,6 +49,7 @@ GetOptions( 'man'   =>  \$man,
 	    'num_genomes|num=s' => \$num_genomes,
 	    'bac120_tsv|bt:s' => \$bac120_tsv,
 	    'hmm_dir|hd:s' => \$hmm_dir,
+		 'ortho_dir|od:s'	=>	\$orthofinder_dir,
             'help|h' => \$help
             ) || die("There was an error in the command line arguements\n");
 
@@ -109,11 +111,11 @@ sub check_input {
 ####IMPORTANT####
 #this has been changed, based on the need to perform statistics on the ORTHOGROUP calling at each froup
 sub get_defined_RED_groups {
+	my ($id) = @_;
 	my $R_installed = system("Rscript --help >/dev/null 2>&1");
 	if($R_installed != 0){
 		die "R command not found. Is R installed/loaded?\n";
 	}
-   my ($id) = @_;
    #run the r-script to calculate RED score
    #pass tree (-t), percent_id (-p), and out_dir  (-o)
    `Rscript --no-save --no-restore $RED_code_full_path -t $phylo_tree -p $id -o $out_dir/$id.dir`;
@@ -194,17 +196,50 @@ sub calculate_RED_group_statistics {
 
 #We will then have to run Orthofinder on each cluster within each red value. This will obviously have to be parallelized.
 #We may try to create a run sheet so that the submissions can be shared across users
+
+#remember that some of the higher RED vals will have a lot of genomic clusters but a small number of genomes inside them
+#while the lower number RED values will have a smaller amount of clusters, but more genomes inside each one
 sub run_orthofinder {
 	#run orthofinder
+	my $run_val = system("$orthofinder_dir/orthofinder -h >/dev/null 2>&1");
+	#first check on orthofinders installation/load
+	if ( $run_val != 0 ) {
+		die "Orthofinder is not found. Make sure to pass in the path with -od or make sure it is installed/loaded\n";
+	}
+	$run_val = system("blastn -h >/dev/null 2>&1");
+	if ( $run_val != 0 ) {
+		die "Blast cannot be run. Make sure to put the code in your PATH and/or make sure it is installed/loaded\n";
+	}
 	
-   
+	$logger->info("Attempting to run orthofinder within each cluster at each possible RED value\n");
+	$logger->info("Building orthofinder commands...\n");
+	
+	my %commands;
+	#I will go through each directory in the out_dir and create an orthofinder command for it
+	opendir( my $ORIG_OUT, $out_dir );
+	while ( readdir $ORIG_OUT ) {
+		if( $_ !~ /\.dir/ ){ next; }
+		my $reddir = $_;
+		opendir( my $RED_DIR, "$out_dir/$_" );
+		while ( readdir $RED_DIR ) {
+			if ( $_ !~ /_fasta/ ) { next; }
+			$commands{"$reddir.$_"} = "orthofinder -S blast -f $out_dir/$reddir/$_\n"; #THIS NEEDS TO BE THREADED WITH A SPECIFIC VALUE
+		}
+		closedir($RED_DIR);
+	}
+	closedir($ORIG_OUT);
+	
+	submit_orthofinder_jobs(\%commands);
+	
+	
+   return();
 }
 
 #Here should go the script to create a tsv file that identifies the bac120 genes in all of the genomes
 sub get_bac120_genes {
 	#the goal here is to have the code that creates a nice metadata file that contains the identity of all the bac120 genomes in the database provided
 	#There is an optioon to pass this file so that it only needs to be run once.
-	my $hmmer_installed = system("hmmsearch -h >/dev/null 2>&1");
+	my $hmmer_installed = system("hmmsearch -h >/dev/null 2>&1"); #this redirects the stderror and the output to /dev/null (Nice piece of code Griffen)
 	if($hmmer_installed != 0){
 		die "hmmsearch command not found. Is HMMER installed/loaded?\n";
 	}
@@ -215,7 +250,7 @@ sub get_bac120_genes {
 	opendir(my $HMMS, $hmm_dir) or die "Cannot open marker hmm directory: $hmm_dir";
 	my @markers;
 	while(readdir $HMMS){
-		if($_ =~ /^\./){ next; } #skip . and .. or any hidden files
+		if($_ =~ /^\./){ next; } #skip . and .. or any hidden files (Very nice)
 		push @markers, $_;
 	}
 	closedir $HMMS;
@@ -233,6 +268,8 @@ sub get_bac120_genes {
 		foreach my $hmm (@markers){
 			my $hmm_id = $hmm; #do this because extension is case sensitive!
 			$hmm_id =~ s/\.hmm//i;
+			
+			#how long does this take? Maybe we should parallelize this using sbatch?
 			`hmmsearch --tblout $out_dir/.tmp/$genome_id.$hmm_id.txt $hmm_dir/$hmm $fasta_dir/$genome_file`; #save parseable output to temp file
 			open(my $results, "<", "$out_dir/.tmp/$genome_id.$hmm_id.txt");
 			foreach my $line (<$results>){
@@ -252,7 +289,27 @@ sub get_bac120_genes {
 
 #should maybe provide a way to run this without running the rest of the script
 sub submit_orthofinder_jobs {
-   
+   my ($jobs_href) = @_;
+	
+	#all the necessary parameters for sbtach
+	my $time = "-t 168:00:00"; #currently set for 1 week
+	my $memory = "4g"; #set to 4gb until we know we need something more
+	my $name = "";
+	my $threads = "4"; #-n
+	my $nodes = "1"; #-N -> want to keep everything together
+	
+	
+	foreach my $location ( keys $jobs_href ) {
+		
+	}
+	
+	
+}
+
+#need to check if orthofinder jobs finished correctly or if they should be re-run starting from a particular position
+check_orthofinder_output {
+	
+	return();
 }
 
 #Once orthofinder is complete, we will need to get the statistics from orthofinder. The idea will be to use the genomes from each RED group and get 2 overall statistics
@@ -360,10 +417,12 @@ No bugs have been reported.
 
 Please report any bugs or feature requests	
 	
-=head1 AUTHOR
+=head1 AUTHOR(S)
 
 Nicholas Colaianni
 contact via C<< <ncolaian@live.unc.edu> >>
+
+Griffen Kingkinner
 
 =head1 LICENCE AND COPYRIGHT
 
