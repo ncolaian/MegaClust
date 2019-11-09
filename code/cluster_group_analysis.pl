@@ -24,11 +24,13 @@ use Log::Log4perl qw(:easy);
 use Log::Log4perl::CommandLine qw(:all);
 use Data::Dumper;
 use List::Util qw(sum min max);
+use FindBin qw($Bin);
 
 #My Variables
 my $help = 0;
 my $man = 0;
-my $RED_code_full_path; #this is a path that will be filled in based on the GIT repository
+my $RED_code_full_path = "$Bin/get_RED_groups.R"; #this is a path that will be filled in based on the GIT repository
+my $path_to_orthostats = "$Bin/orthogroup_statistics.pl";
 my $phylo_tree;
 my $percent_id = .95;
 my $out_dir;
@@ -36,7 +38,7 @@ my $fasta_dir;
 my $fasta_ext = "faa";
 my $num_genomes; #this will be calculated to check the fasta extension and directory parameters
 my $bac120_tsv = "bac120_gene_info.tsv";
-my $hmm_dir;
+my $hmm_dir = "$Bin/../data/bac120_hmms/";
 my $orthofinder_dir = "";
 my $max_queue = 500; #how many jobs can be handled by the job server at once
 my $config_file;
@@ -81,7 +83,7 @@ if ( $re_run == 0 ) { #skips this step in the case of reruns
 run_orthofinder($re_run);
 
 #Step 3: Get completeness statistics
-
+get_ortholog_stats();
 
 ## Subroutines ##
 
@@ -96,8 +98,14 @@ sub check_input {
 	if(! defined $RED_code_full_path){
 		pod2usage(-message => "ERROR- Required parameter not found: --RED_code\n", -exitval => 2);
 	}
+	if(! -e $RED_code_full_path){ #can also check if R is installed here. Could add a -h option to rscript so we can test if it specifically is the script we want.
+		pod2usage(-message => "ERROR- RED code file $RED_code_full_path deos not exist. Make sure the path is correct.", exitval => 2);
+	}
 	if(! defined $phylo_tree){
 		pod2usage(-message => "ERROR- Required parameter not found: --phylo_tree\n", -exitval => 2);
+	}
+	if(! -e $phylo_tree){
+		pod2usage(-message => "ERROR- Tree file $phylo_tree does not exist. Make sure the path is correct.", exitval => 2);
 	}
 	if(! defined $out_dir){
 		pod2usage(-message => "ERROR- Required parameter not found: --out_dir\n", -exitval => 2);
@@ -105,26 +113,30 @@ sub check_input {
 	if(! defined $fasta_dir){
 		pod2usage(-message => "ERROR- Required parameter not found: --fasta_dir\n", -exitval => 2);
 	}
+	if(! -d $fasta_dir){
+		pod2usage(-message => "ERROR- The directory $fasta_dir does not exist. Make sure the path is correct.", exitval => 2);
+	}
 	if(! defined $num_genomes){
 		$logger->info("Number of genomes was not passed. We will calculate it using the fasta directory and extension\n");
-		$num_genomes = (`ls -lh *$fasta_ext | wc -l` - 1);
+		$num_genomes = (`ls -1 $fasta_dir/*$fasta_ext | wc -l`) + 0;
 		if ( $num_genomes < 2 ) {
 			pod2usage(-message => "ERROR- No genomes were found using fasta extension and fasta directory options\nMake sure they are passed correctly: --fasta_dir and/or --fasta_ext\n", -exitval => 2);
 		}
+		$logger->info("$num_genomes genome files were found in $fasta_dir");
 	}
 	else{
-		my $test = (`ls -lh *$fasta_ext | wc -l` - 1);
+		my $test = (`ls -lh $fasta_dir/*$fasta_ext | wc -l`) + 0;
 		if ( $num_genomes != $test ) {
 			pod2usage(-message => "ERROR- Genome number does not match the count obtained from the fasta extension and fasta directory options\nMake sure they are passed correctly: --fasta_dir and/or --fasta_ext\n", -exitval => 2);
 		}
 	}
 	if( ! -e $bac120_tsv ) {
 		if(! defined $hmm_dir){
-			pod2usage(-message => "ERROR- Bac120 tsv file not found. Must provide a directory of marker hmms", -exitval => 2);
+			pod2usage(-message => "ERROR- Bac120 tsv file not found. Must provide either this file or a directory of marker hmms.", -exitval => 2);
 		}
 		else{
 			$logger->info("Bac120 tsv file not found. A new one will be created in the out directory\n");
-			get_bac120_genes();
+			$bac120_tsv = get_bac120_genes();
 		}
 	}
    $logger->info("All needed inputs were passed\n");
@@ -159,6 +171,9 @@ sub get_defined_RED_groups {
 sub create_directories_based_on_RED {
    if ( ! -d $out_dir ) {
       mkdir $out_dir;
+   }
+   if ( ! -d "$out_dir/tmp" ) {
+      mkdir "$out_dir/tmp";
    }
    #I will create an array to store all of the directories needed
    my @perc_ids;
@@ -230,7 +245,7 @@ sub run_orthofinder {
 	my ($run_situation) = @_;
 	
 	#run orthofinder
-	my $run_val = system("$orthofinder_dir/orthofinder -h >/dev/null 2>&1");
+	my $run_val = system($orthofinder_dir . "orthofinder -h >/dev/null 2>&1");
 	#first check on orthofinders installation/load
 	if ( $run_val != 0 ) {
 		die "Orthofinder is not found. Make sure to pass in the path with -od or make sure it is installed/loaded\n";
@@ -240,7 +255,8 @@ sub run_orthofinder {
 		die "Blast cannot be run. Make sure to put the code in your PATH and/or make sure it is installed/loaded\n";
 	}
 	my @commands;
-	
+	my @names;
+
 	if ( $run_situation == 0 ) { #this checks if the script has been re-reun or not
 		$logger->info("Attempting to run orthofinder within each cluster at each possible RED value\n");
 		$logger->info("Building orthofinder commands...\n");
@@ -254,32 +270,25 @@ sub run_orthofinder {
 			opendir( my $RED_DIR, "$out_dir/$_" );
 			while ( readdir $RED_DIR ) {
 				if ( $_ !~ /_fasta/ ) { next; }
-				push @commands, "orthofinder -S blast -f $out_dir/$reddir/$_\n";
+				push @commands, "orthofinder -S blast -f $out_dir/$reddir/$_";
+				push @names, "$reddir.$_";
 				#$commands{"$reddir.$_"} = "orthofinder -S blast -f $out_dir/$reddir/$_\n"; #THIS NEEDS TO BE THREADED WITH A SPECIFIC VALUE
 			}
 			closedir($RED_DIR);
 		}
 		closedir($ORIG_OUT);
 	}
-	else {
-		$logger->info("Getting the Jobs that were not submitted yet\n");
-		open my $JOBS, "<", "$out_dir/.restart.jobs";
-		while( <$JOBS> ) {
-			chomp $_;
-			push @commands, $_;
-		}
-		close $JOBS;
-		`rm $out_dir/.restart.jobs`; #get rid of the old jobs folder
-	}
 	
 	
 	
 	#keep re-running orthofinder untill all the commands have finished
-	submit_orthofinder_jobs(\@commands); #will have to add a feature to check for initial or new orthofinder runs
-	@commands = check_orthofinder_jobs();
+	submit_orthofinder_jobs(\@commands, \@names); #will have to add a feature to check for initial or new orthofinder runs
+	my ($command_aref, $name_aref) = check_orthofinder_jobs();
+	@commands = @{$command_aref};
+	@names = @{$name_aref};
 	while ( scalar @commands > 0 ) {
-		submit_orthofinder_jobs(\@commands);
-		@commands = check_orthofinder_jobs();
+		submit_orthofinder_jobs(\@commands, \@names);
+		($command_aref, $name_aref) = check_orthofinder_jobs();
 	}
    return();
 }
@@ -292,9 +301,10 @@ sub get_bac120_genes {
 	if($hmmer_installed != 0){
 		die "hmmsearch command not found. Is HMMER installed/loaded?\n";
 	}
-	$logger->info("Attempting to create bac120 gene id file at $out_dir/$bac120_tsv\n");
+	my $outpath = "bac120_gene_info.tsv";
+	$logger->info("Attempting to create bac120 gene id file at $out_dir/$outpath\n");
 	
-	if(! -d "$out_dir/.tmp"){ mkdir "$out_dir/.tmp"; }
+	if(! -d "$out_dir/tmp"){ mkdir "$out_dir/tmp"; }
 	#Create array of markers. These will be hmm profiles of the bac120 genes.
 	opendir(my $HMMS, $hmm_dir) or die "Cannot open marker hmm directory: $hmm_dir";
 	my @markers;
@@ -307,7 +317,7 @@ sub get_bac120_genes {
 	#For each genome, find the gene that is most similar to each marker.
 	#Write to a file with three columns: "bac120_gene	genome_id	gene_id"
 	opendir(my $FASTAS, $fasta_dir) or die "Cannot open fasta directory: $fasta_dir";
-	open(my $outfile, ">", "$out_dir/$bac120_tsv") or die "Cannot open output tsv: $out_dir/$bac120_tsv";
+	open(my $outfile, ">", "$out_dir/$outpath") or die "Cannot open output tsv: $out_dir/$bac120_tsv";
 	print $outfile "marker_gene\tgenome_id\tgene_id\n";
 	while(readdir $FASTAS){
 		if($_ =~ /^\./){ next; } #skip . and .. or any hidden files
@@ -319,8 +329,8 @@ sub get_bac120_genes {
 			$hmm_id =~ s/\.hmm//i;
 			
 			#how long does this take? Maybe we should parallelize this using sbatch?
-			`hmmsearch --tblout $out_dir/.tmp/$genome_id.$hmm_id.txt $hmm_dir/$hmm $fasta_dir/$genome_file`; #save parseable output to temp file
-			open(my $results, "<", "$out_dir/.tmp/$genome_id.$hmm_id.txt");
+			`hmmsearch --tblout $out_dir/tmp/$genome_id.$hmm_id.txt $hmm_dir/$hmm $fasta_dir/$genome_file`; #save parseable output to temp file
+			open(my $results, "<", "$out_dir/tmp/$genome_id.$hmm_id.txt");
 			foreach my $line (<$results>){
 				chomp $line;
 				if($line =~ /^#/){ next; }
@@ -329,19 +339,22 @@ sub get_bac120_genes {
 				last;
 			}
 			close($results);
-			`rm $out_dir/.tmp/$genome_id.$hmm_id.txt`;
+			`rm $out_dir/tmp/$genome_id.$hmm_id.txt`;
 		}
 	}
 	close $FASTAS;
 	close($outfile);
+	return("$out_dir/$outpath");
 }
 
 #should maybe provide a way to run this without running the rest of the script
 sub submit_orthofinder_jobs {
-   my ($jobs_aref) = @_;
+   my ($jobs_aref, $names_aref) = @_;
 	
 	$logger->info("Submitting orthofinder jobs to sbatch");
 	
+	my @jobs_to_submit = @{$jobs_aref};
+
 	#all the necessary parameters for sbtach
 	my $time = "-t 168:00:00"; #currently set for 1 week
 	my $memory = "--mem=10g"; #set to 4gb until we know we need something more
@@ -359,14 +372,28 @@ sub submit_orthofinder_jobs {
 	#build job commands for sbatch and then run them. Keep track of any jobs that are over the maximum allowed in the lsf queue
 	my @jobs_remaining;
 	my $job_count = 0;
-	
+
+	if($re_run == 1){
+		$logger->info("Getting the Jobs that were not submitted yet\n");
+		open my $JOBS, "<", "$out_dir/.restart.jobs";
+		while( <$JOBS> ) {
+			chomp $_;
+			push @jobs_to_submit, $_;
+		}
+		close $JOBS;
+		`rm $out_dir/.restart.jobs`; #get rid of the old jobs folder
+	}
+
 	#this will handle resubmitted scripts
 	if ( -s "$out_dir/ACTIVE_JOBS" ) {
 		$job_count = `wc -l $out_dir/ACTIVE_JOBS`
 	}
-	foreach my $command ( @{$jobs_aref} ) {
-		my $job_out_name = "$job_output_dir/$name.out";
-		$command = `sbatch $partition $time $memory -J $name $threads $nodes $job_out_name --wrap=\"$command\"`;
+	my $i = 0;
+	foreach my $command ( @jobs_to_submit ) {
+		if($re_run == 0){
+			my $job_out_name = "$job_output_dir/${$names_aref}[$i].out";
+			$command = "sbatch $partition $time $memory -J $name $threads $nodes $job_out_name --wrap=\"$command\"";
+		}
 		if ( $job_count > $max_queue ) {
 			push @jobs_remaining, $command;
 		}
@@ -374,6 +401,7 @@ sub submit_orthofinder_jobs {
 			system($command);
 		}
 		$job_count++;
+		$i++;
 	}
 	
 	#I will now try to get the code to wait until orthofinder is finished running
@@ -386,7 +414,7 @@ sub stall_for_orthofinder {
 	$logger->info("Stalling script for orthofinder to complete running\n");
 	
 	#dereference the href
-	my @jobs_remain = @$jobs_remaining_aref;
+	my @jobs_remain = @{$jobs_remaining_aref};
 	
 	#Create Active job file
 	`echo start > $out_dir/ACTIVE_JOBS`;
@@ -419,7 +447,60 @@ sub stall_for_orthofinder {
 
 #need to check if orthofinder jobs finished correctly or if they should be re-run starting from a particular position
 sub check_orthofinder_jobs {
-	
+	#EASIER TO KEEP SBATCH OUTPUT AS IT'S EASIER TO PARSE. STILL ISSUE TO RESUME BEACUSE YOU CANNOT STATE DESIRED OUTPUT PATH, SO IT WILL CREATE NEW ORTHOFINDER FOLDER INSIDE WORKINGDIRECTORY...
+	my @commands;
+	my @names;
+	opendir( my $ORIG_OUT, $out_dir);
+	while( readdir $ORIG_OUT ){
+		if( $_ !~ /\.dir/ ){ next; }
+		my $reddir = $_;
+		opendir( my $RED_DIR, "$out_dir/$reddir" );
+		while( readdir $RED_DIR ){
+			if( $_ !~ /_fasta/ ){ next; }
+			my $groupdir = $_;
+			my $name = "$reddir.$groupdir";
+			if(! -e "$out_dir/tmp/$name.out"){
+				push @commands, "orthofinder -S blast -f $out_dir/$reddir/$groupdir";
+				push @names, $name;
+				next;
+			}
+
+			my $stage;
+			open(my $logfile, "<", "$out_dir/tmp/$name.out");
+			foreach my $line (<$logfile>){
+				chomp $line;
+				if( $line =~ m/Done all-versus-all sequence search/i ){ #have to move blast output and various other files to node_##_fasta dir to use -b and get output in riht place
+					$stage = "blast";
+				}
+				if($line =~ m/Done orthogroups/i ){
+					$stage = "done";
+					last;
+				}
+			}
+			close($logfile);
+			if( $stage eq "done" ){
+				if( -e "$out_dir/$reddir/$groupdir/SpeciesIDs.txt" ){
+					system("rm $out_dir/$reddir/$groupdir/WorkingDirectory/Blast*");
+                                	system("rm $out_dir/$reddir/$groupdir/WorkingDirectory/Species*.fa");
+                                	system("rm $out_dir/$reddir/$groupdir/WorkingDirectory/*IDs.txt");
+				}
+				next;
+			}
+			if( $stage eq "blast" ){
+				#move the files to the node fasta directory
+				my $results_dir = `ls -td $out_dir/$reddir/$groupdir/OrthoFinder/*/ | grep -v \$/ | head -1`;
+				chomp $results_dir;
+				system("mv $results_dir/WorkingDirectory/Blast* $out_dir/$reddir/$groupdir/");
+				system("mv $results_dir/WorkingDirectory/Species*.fa $out_dir/$reddir/$groupdir/");
+				system("mv $results_dir/WorkingDirectory/*IDs.txt $out_dir/$reddir/$groupdir/");
+				push @commands, "orthofinder -b $out_dir/$reddir/$groupdir";
+				push @names, $name;
+			}
+		}
+		closedir($RED_DIR);
+	}
+	closedir($ORIG_OUT);
+	return(\@commands, \@names);
 }
 
 #Once orthofinder is complete, we will need to get the statistics from orthofinder. The idea will be to use the genomes from each RED group and get 2 overall statistics
@@ -428,7 +509,12 @@ sub check_orthofinder_jobs {
 
 #these two stats are from Isai's Nature Genetics story
 sub get_ortholog_stats {
-	
+	opendir( my $ORIG_OUT, "$out_dir" );
+	while(readdir $ORIG_OUT){
+		if( $_ !~ /\.dir/ ){ next; }
+		my $reddir = $_;
+		system("perl $path_to_orthostats $bac120_tsv $out_dir/$reddir");
+	}
 }
 
 sub restart {
@@ -442,10 +528,10 @@ sub restart {
     $logger->debug("Restart jobs file: $jobs_file");
     
     # resubmit the master job (ie this script)
-    my $command = "sbatch -p general -o lsf.out -e lsf.err -J restart -t 168:00:00 --wrap=\"";
-    $command .= "perl ~/code/cluster_group_analysis.pl";
+    my $command = "sbatch -p general -o $out_dir/tmp/reset_log.txt -e $out_dir/tmp/reset_log.txt -J restart -t 168:00:00 --wrap=\"";
+    $command .= "perl $Bin/cluster_group_analysis.pl ";
     $command .= "--config_file $config_file ";
-    $command .= "--jobs_file $jobs_file ";
+    #$command .= "--jobs_file $jobs_file ";
     $command .= "--debug \"";
     $logger->debug("Restart command: $command");
     
@@ -470,7 +556,7 @@ sub save_config {
 	print $CON "fasta_ext=$fasta_ext\n";
 	print $CON "num_genomes=$num_genomes\n"; #this will be calculated to check the fasta extension and directory parameters
 	print $CON "bac120_tsv=$bac120_tsv\n";
-	print $CON "hmm_dir=$hmm_dir\n";
+	if(defined $hmm_dir){ print $CON "hmm_dir=$hmm_dir\n"; }
 	print $CON "ortho_dir=$orthofinder_dir\n"; #how many jobs can be handled by the job server at once
 	print $CON "max_queue=$max_queue\n";
 	print $CON "max_runtime=$runtime_max\n";
@@ -499,6 +585,7 @@ sub get_input {
 		chomp $_;
 		my $op = (split /=/, $_)[0];
 		my $value = (split /=/, $_)[1];
+		$options{$op} = $value;
 	}
 	close $CONFIG;
 	`rm $config_file`;
