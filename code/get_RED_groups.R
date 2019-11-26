@@ -32,15 +32,35 @@ library(castor)
 params = matrix(c(
   "tree", "t", 1, "character",
   "percent_ident", "p", 1, "character",
-  "out_dir", "o", 1, "character"
+  "out_dir", "o", 1, "character",
+  "nodelist", "n", 2, "character"
 ), byrow = TRUE, ncol = 4)
 opt = getopt(params)
 
-grab_group_with_max_redval <- function(tree, red_cutoff) {
+grab_group_with_max_redval <- function(tree, red_cutoff, nodelist) {
   red_vals <- (length(tree$tip.label)+1):(length(tree$edge.length)+1)
   red_vals <- c(red_vals, get_reds(tree) )
   red_vals <- matrix(red_vals, ncol=2)
-  
+  if ( length(nodelist) != 0 ) {
+    for (node in nodelist){
+      red_vals[1, 2] <- red_vals[1, 2] + red_vals[which(red_vals[,1] == node), 2]
+    }
+    for (node in nodelist) {
+      tree1 <- root( tree, node = as.integer(node) )
+      reds <- tree1$node.label
+      for(i in 2:length(reds)){
+        reds[i] = as.integer(as.character(reds[i]))
+      }
+      reds <- c(reds, get_reds(tree1))
+      reds <- matrix(reds, ncol=2)
+      for (j in 2:(nrow(red_vals)-1)){
+        red_vals[j,2] = red_vals[j,2] + as.numeric(reds[which(reds[,1] == red_vals[j,1]), 2])
+        
+      }
+    }
+  }
+  test <- red_vals[order(red_vals[,2]),]
+  red_vals[,2] <- ( red_vals[,2] / (1+length(nodelist)) )
   #get the nodes that reach the cutoff threshold
   over_cutoff <- red_vals[which(red_vals[,2] > red_cutoff),]
   over_cutoff <- over_cutoff[order(over_cutoff[,2]),]
@@ -61,11 +81,8 @@ grab_group_with_max_redval <- function(tree, red_cutoff) {
 #basically I will be trying to identify the nodes in which meet this criteria
 
 tree <- read.tree(opt$tree)
-out_groups <- grab_group_with_max_redval(tree,opt$percent_ident)
+tree$node.label = (length(tree$tip.label)+1):(length(tree$edge.length)+1)
+nodes <- readLines(opt$nodelist)
+out_groups <- grab_group_with_max_redval(tree,opt$percent_ident, nodes)
 out_groups <- matrix(out_groups, ncol=2, byrow = T)
 write.table(out_groups, paste(opt$out_dir, "/red_groups.tsv", sep=""), sep="\t", row.names = F, quote = F, col.names = F)
-
-
-
-
-
