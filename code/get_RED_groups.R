@@ -59,7 +59,6 @@ grab_group_with_max_redval <- function(tree, red_cutoff, nodelist) {
       }
     }
   }
-  test <- red_vals[order(red_vals[,2]),]
   red_vals[,2] <- ( red_vals[,2] / (1+length(nodelist)) )
   #get the nodes that reach the cutoff threshold
   over_cutoff <- red_vals[which(red_vals[,2] > red_cutoff),]
