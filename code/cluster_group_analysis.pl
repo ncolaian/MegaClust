@@ -157,7 +157,8 @@ sub get_defined_RED_groups {
 	}
    #run the r-script to calculate RED score
    #pass tree (-t), percent_id (-p), and out_dir  (-o)
-   `Rscript --no-save --no-restore $RED_code_full_path -t $phylo_tree -p $id -o $out_dir/$id.dir`;
+   `Rscript --no-save --no-restore $Bin/find_special_nodes.R -t $phylo_tree -o $out_dir/$id.dir`;
+   `Rscript --no-save --no-restore $RED_code_full_path -t $phylo_tree -p $id -n $out_dir/$id.dir/nodes_to_root.tsv -o $out_dir/$id.dir`;
    #get stastics along with creating the directory structure needed
    calculate_RED_group_statistics($id);
    return();
@@ -304,45 +305,43 @@ sub get_bac120_genes {
 	my $outpath = "bac120_gene_info.tsv";
 	$logger->info("Attempting to create bac120 gene id file at $out_dir/$outpath\n");
 	
-	if(! -d "$out_dir/tmp"){ mkdir "$out_dir/tmp"; }
-	#Create array of markers. These will be hmm profiles of the bac120 genes.
-	opendir(my $HMMS, $hmm_dir) or die "Cannot open marker hmm directory: $hmm_dir";
-	my @markers;
-	while(readdir $HMMS){
-		if($_ =~ /^\./){ next; } #skip . and .. or any hidden files (Very nice)
-		push @markers, $_;
-	}
-	closedir $HMMS;
-
 	#For each genome, find the gene that is most similar to each marker.
 	#Write to a file with three columns: "bac120_gene	genome_id	gene_id"
+	my @genomes;
 	opendir(my $FASTAS, $fasta_dir) or die "Cannot open fasta directory: $fasta_dir";
-	open(my $outfile, ">", "$out_dir/$outpath") or die "Cannot open output tsv: $out_dir/$bac120_tsv";
-	print $outfile "marker_gene\tgenome_id\tgene_id\n";
 	while(readdir $FASTAS){
 		if($_ =~ /^\./){ next; } #skip . and .. or any hidden files
 		my ($genome_file, $genome_id) = ($_, $_);
 		$genome_id =~ s/\.$fasta_ext//; #Get id without extension to write to output
+		push @genomes, $genome_id;
 		$logger->debug("About to run hmmsearch for each marker hmm on genome $genome_id");
-		foreach my $hmm (@markers){
-			my $hmm_id = $hmm; #do this because extension is case sensitive!
-			$hmm_id =~ s/\.hmm//i;
-			
-			#how long does this take? Maybe we should parallelize this using sbatch?
-			`hmmsearch --tblout $out_dir/tmp/$genome_id.$hmm_id.txt $hmm_dir/$hmm $fasta_dir/$genome_file`; #save parseable output to temp file
-			open(my $results, "<", "$out_dir/tmp/$genome_id.$hmm_id.txt");
-			foreach my $line (<$results>){
-				chomp $line;
-				if($line =~ /^#/){ next; }
-				my @vals = split ' ', $line; #greedy whitespace splitter
-				print $outfile "$hmm_id\t$genome_id\t$vals[0]\n";
-				last;
-			}
-			close($results);
-			`rm $out_dir/tmp/$genome_id.$hmm_id.txt`;
-		}
+		while(`squeue -h -n hmmsearch | wc -l` >= $max_queue){
+			sleep 30;
+		} 
+		`sbatch $Bin/run_hmmsearch.sh $hmm_dir $fasta_dir/$genome_file $out_dir/tmp/hmmsearch_out/$genome_id.txt`;
 	}
 	close $FASTAS;
+	while(`squeue -h -n hmmsearch | wc -l` > 0){
+		sleep 120;
+		$logger->debug("Waiting for hmmsearch jobs to finish");
+	}
+	open(my $outfile, ">", "$out_dir/$outpath");
+	print $outfile "marker_gene\tgenome_id\tgene_id\n";
+	foreach my $genome (@genomes){
+		open(my $results, "<", "$out_dir/tmp/hmmsearch_out/$genome.txt");
+		my ($hmm, $gene);
+		foreach my $line (<$results>){
+			chomp $line;
+			if($line =~ /^Accession/){
+				my @vals = split ' ', $line;
+				$hmm = $vals[1];
+			}
+			if($line =~ /^>>/){
+				my @vals = split ' ', $line;
+				print $outfile "$hmm\t$genome\t$vals[1]\n";
+			}
+		}
+	}
 	close($outfile);
 	return("$out_dir/$outpath");
 }
@@ -386,7 +385,8 @@ sub submit_orthofinder_jobs {
 
 	#this will handle resubmitted scripts
 	if ( -s "$out_dir/ACTIVE_JOBS" ) {
-		$job_count = `wc -l $out_dir/ACTIVE_JOBS`
+		my @wcout = split ' ', `wc -l $out_dir/ACTIVE_JOBS`;
+		$job_count = $wcout[0];
 	}
 	my $i = 0;
 	foreach my $command ( @jobs_to_submit ) {
@@ -429,7 +429,8 @@ sub stall_for_orthofinder {
 		
 		#check to see if we can start running any more jobs
 		if ( scalar(@jobs_remain > 0) ) {
-		 my $lines = `wc -l $out_dir/ACTIVE_JOBS`;
+		 my @wcout = split ' ', `wc -l $out_dir/ACTIVE_JOBS`;
+		 my $lines = $wcout[0];
 		 if ( $lines < $max_queue ) {
 			 my $command = shift @jobs_remain;
 			 system($command);
