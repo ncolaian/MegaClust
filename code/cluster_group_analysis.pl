@@ -180,7 +180,7 @@ sub create_directories_based_on_RED {
    my @perc_ids;
    #first create the test databases if need be
    if ( $percent_id == 0 ) {
-      for ( my $i = .95; $i >= .50; $i = $i - 0.05) {
+      for ( my $i = .80; $i >= .49; $i = $i - 0.05) {
          push @perc_ids, $i;
       }
    }
@@ -478,8 +478,13 @@ sub check_orthofinder_jobs {
 					last;
 				}
 			}
+#I think this is checking before things can start running. This will allow the error to stop
+			if ( $stage eq "" ) {
+			    next;
+			}
 			close($logfile);
 			if( $stage eq "done" ){
+opendir 
 				if( -e "$out_dir/$reddir/$groupdir/SpeciesIDs.txt" ){
 					system("rm $out_dir/$reddir/$groupdir/WorkingDirectory/Blast*");
                                 	system("rm $out_dir/$reddir/$groupdir/WorkingDirectory/Species*.fa");
@@ -529,7 +534,7 @@ sub restart {
     $logger->debug("Restart jobs file: $jobs_file");
     
     # resubmit the master job (ie this script)
-    my $command = "sbatch -p general -o $out_dir/tmp/reset_log.txt -e $out_dir/tmp/reset_log.txt -J restart -t 168:00:00 --wrap=\"";
+    my $command = "sbatch -p general -o $out_dir/tmp/reset_log.txt -e $out_dir/tmp/reset_log.txt -J restart -t 518400 --wrap=\"";
     $command .= "perl $Bin/cluster_group_analysis.pl ";
     $command .= "--config_file $config_file ";
     #$command .= "--jobs_file $jobs_file ";
@@ -589,7 +594,7 @@ sub get_input {
 		$options{$op} = $value;
 	}
 	close $CONFIG;
-	`rm $config_file`;
+	#`rm $config_file`;
 	
 	#go through and re apply all of the parameters
 	$RED_code_full_path = $options{"RED_code"}; #this is a path that will be filled in based on the GIT repository
