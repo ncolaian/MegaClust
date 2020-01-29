@@ -459,6 +459,15 @@ sub check_orthofinder_jobs {
 		while( readdir $RED_DIR ){
 			if( $_ !~ /_fasta/ ){ next; }
 			my $groupdir = $_;
+#I will be making sure to get the directory where working directory is
+			opendir( my $GROUP_DIR, "$out_dir/$reddir/$groupdir" );
+			my $dir_containing_ortho_working_dir = "";
+			while ( readdir $GROUP_DIR ) {
+if ( $_ !~ /\.faa/ ) {
+    $dir_containing_ortho_working_dir = $_;
+}
+			}
+			close($GROUP_DIR);
 			my $name = "$reddir.$groupdir";
 			if(! -e "$out_dir/tmp/$name.out"){
 				push @commands, "orthofinder -S blast -f $out_dir/$reddir/$groupdir";
@@ -484,22 +493,17 @@ sub check_orthofinder_jobs {
 			}
 			close($logfile);
 			if( $stage eq "done" ){
-opendir 
-				if( -e "$out_dir/$reddir/$groupdir/SpeciesIDs.txt" ){
-					system("rm $out_dir/$reddir/$groupdir/WorkingDirectory/Blast*");
-                                	system("rm $out_dir/$reddir/$groupdir/WorkingDirectory/Species*.fa");
-                                	system("rm $out_dir/$reddir/$groupdir/WorkingDirectory/*IDs.txt");
+				if( -e "$out_dir/$reddir/$groupdir/$dir_containing_ortho_working_dir/WorkingDirectory/SpeciesIDs.txt" ){
+					system("rm $out_dir/$reddir/$groupdir/$dir_containing_ortho_working_dir/WorkingDirectory/Blast*");
+                                	system("rm $out_dir/$reddir/$groupdir/$dir_containing_ortho_working_dir/WorkingDirectory/Species*.fa");
+                                	system("rm $out_dir/$reddir/$groupdir/$dir_containing_ortho_working_dir/WorkingDirectory/*IDs.txt");
 				}
 				next;
 			}
 			if( $stage eq "blast" ){
 				#move the files to the node fasta directory
-				my $results_dir = `ls -td $out_dir/$reddir/$groupdir/OrthoFinder/*/ | grep -v \$/ | head -1`;
-				chomp $results_dir;
-				system("mv $results_dir/WorkingDirectory/Blast* $out_dir/$reddir/$groupdir/");
-				system("mv $results_dir/WorkingDirectory/Species*.fa $out_dir/$reddir/$groupdir/");
-				system("mv $results_dir/WorkingDirectory/*IDs.txt $out_dir/$reddir/$groupdir/");
-				push @commands, "orthofinder -b $out_dir/$reddir/$groupdir";
+				
+				push @commands, "orthofinder -b $out_dir/$reddir/$groupdir/$dir_containing_ortho_working_dir/WorkingDirectory";
 				push @names, $name;
 			}
 		}
@@ -534,7 +538,7 @@ sub restart {
     $logger->debug("Restart jobs file: $jobs_file");
     
     # resubmit the master job (ie this script)
-    my $command = "sbatch -p general -o $out_dir/tmp/reset_log.txt -e $out_dir/tmp/reset_log.txt -J restart -t 518400 --wrap=\"";
+    my $command = "sbatch -p general -o $out_dir/tmp/reset_log.txt -e $out_dir/tmp/reset_log.txt -J restart -t 168:00:00 --wrap=\"";
     $command .= "perl $Bin/cluster_group_analysis.pl ";
     $command .= "--config_file $config_file ";
     #$command .= "--jobs_file $jobs_file ";
