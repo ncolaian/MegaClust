@@ -258,7 +258,7 @@ sub run_orthofinder {
 	my @commands;
 	my @names;
 
-	if ( $run_situation == 0 ) { #this checks if the script has been re-reun or not
+	if ( $re_run == 0 ) { #this checks if the script has been re-reun or not
 		$logger->info("Attempting to run orthofinder within each cluster at each possible RED value\n");
 		$logger->info("Building orthofinder commands...\n");
 		
@@ -278,18 +278,22 @@ sub run_orthofinder {
 			closedir($RED_DIR);
 		}
 		closedir($ORIG_OUT);
+		submit_orthofinder_jobs(\@commands, \@names);
 	}
 	
 	
 	
 	#keep re-running orthofinder untill all the commands have finished
-	submit_orthofinder_jobs(\@commands, \@names); #will have to add a feature to check for initial or new orthofinder runs
+	#submit_orthofinder_jobs(\@commands, \@names); #will have to add a feature to check for initial or new orthofinder runs
 	my ($command_aref, $name_aref) = check_orthofinder_jobs();
 	@commands = @{$command_aref};
 	@names = @{$name_aref};
+	print Dumper(@commands);
 	while ( scalar @commands > 0 ) {
 		submit_orthofinder_jobs(\@commands, \@names);
 		($command_aref, $name_aref) = check_orthofinder_jobs();
+		@commands = @{$command_aref};
+		@names = @{$name_aref};
 	}
    return();
 }
@@ -463,9 +467,9 @@ sub check_orthofinder_jobs {
 			opendir( my $GROUP_DIR, "$out_dir/$reddir/$groupdir" );
 			my $dir_containing_ortho_working_dir = "";
 			while ( readdir $GROUP_DIR ) {
-if ( $_ !~ /\.faa/ ) {
-    $dir_containing_ortho_working_dir = $_;
-}
+				if ( $_ !~ /\.faa/ ) {
+					 $dir_containing_ortho_working_dir = $_;
+				}
 			}
 			close($GROUP_DIR);
 			my $name = "$reddir.$groupdir";
@@ -475,7 +479,7 @@ if ( $_ !~ /\.faa/ ) {
 				next;
 			}
 
-			my $stage;
+			my $stage = "b";
 			open(my $logfile, "<", "$out_dir/tmp/$name.out");
 			foreach my $line (<$logfile>){
 				chomp $line;
@@ -488,7 +492,8 @@ if ( $_ !~ /\.faa/ ) {
 				}
 			}
 #I think this is checking before things can start running. This will allow the error to stop
-			if ( $stage eq "" ) {
+			if ( $stage eq "b" ) {
+				print "This must be restarted\n";
 			    next;
 			}
 			close($logfile);
@@ -502,6 +507,7 @@ if ( $_ !~ /\.faa/ ) {
 			}
 			if( $stage eq "blast" ){
 				#move the files to the node fasta directory
+				
 				
 				push @commands, "orthofinder -b $out_dir/$reddir/$groupdir/$dir_containing_ortho_working_dir/WorkingDirectory";
 				push @names, $name;
