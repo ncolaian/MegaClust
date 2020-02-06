@@ -271,7 +271,7 @@ sub run_orthofinder {
 			opendir( my $RED_DIR, "$out_dir/$_" );
 			while ( readdir $RED_DIR ) {
 				if ( $_ !~ /_fasta/ ) { next; }
-				push @commands, "orthofinder -S blast -f $out_dir/$reddir/$_";
+				push @commands, "orthofinder -S blast -t 32 -f $out_dir/$reddir/$_";
 				push @names, "$reddir.$_";
 				#$commands{"$reddir.$_"} = "orthofinder -S blast -f $out_dir/$reddir/$_\n"; #THIS NEEDS TO BE THREADED WITH A SPECIFIC VALUE
 			}
@@ -362,7 +362,7 @@ sub submit_orthofinder_jobs {
 	my $time = "-t 168:00:00"; #currently set for 1 week
 	my $memory = "--mem=10g"; #set to 4gb until we know we need something more
 	my $name = "ortho";
-	my $threads = "-n 16"; #-n
+	my $threads = "-n 32"; #-n
 	my $nodes = "-N 1"; #-N -> want to keep everything together
 	my $job_output_dir = "-o $out_dir/tmp"; #this will be the directory where the sbatch output will be stored
 	my $partition = "-p general";
@@ -395,6 +395,10 @@ sub submit_orthofinder_jobs {
 	my $i = 0;
 	foreach my $command ( @jobs_to_submit ) {
 		if($re_run == 0){
+			my $job_out_name = "$job_output_dir/${$names_aref}[$i].out";
+			$command = "sbatch $partition $time $memory -J $name $threads $nodes $job_out_name --wrap=\"$command\"";
+		}
+		else{
 			my $job_out_name = "$job_output_dir/${$names_aref}[$i].out";
 			$command = "sbatch $partition $time $memory -J $name $threads $nodes $job_out_name --wrap=\"$command\"";
 		}
@@ -474,7 +478,7 @@ sub check_orthofinder_jobs {
 			close($GROUP_DIR);
 			my $name = "$reddir.$groupdir";
 			if(! -e "$out_dir/tmp/$name.out"){
-				push @commands, "orthofinder -S blast -f $out_dir/$reddir/$groupdir";
+				push @commands, "orthofinder -t 32 -S blast -f $out_dir/$reddir/$groupdir";
 				push @names, $name;
 				next;
 			}
@@ -493,9 +497,12 @@ sub check_orthofinder_jobs {
 			}
 #I think this is checking before things can start running. This will allow the error to stop
 			if ( $stage eq "b" ) {
-				print "This must be restarted\n";
-			    next;
+				`rm -r $out_dir/$reddir/$groupdir/$dir_containing_ortho_working_dir`;
+				push @commands, "orthofinder -t 32 -S blast -f $out_dir/$reddir/$groupdir";
+				push @names, $name;
+				next;
 			}
+			
 			close($logfile);
 			if( $stage eq "done" ){
 				if( -e "$out_dir/$reddir/$groupdir/$dir_containing_ortho_working_dir/WorkingDirectory/SpeciesIDs.txt" ){
